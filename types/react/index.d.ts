@@ -59,7 +59,7 @@ declare namespace React {
     type ComponentType<P = {}> = ComponentClass<P> | FunctionComponent<P>;
 
     type JSXElementConstructor<P> =
-        | ((props: P) => ReactElement<any> | null)
+        | ((props: P) => ReactElement | null)
         | (new (props: P) => Component<P, any>);
 
     type Key = string | number;
@@ -83,7 +83,7 @@ declare namespace React {
         ref?: LegacyRef<T>;
     }
 
-    interface ReactElement<P, T extends string | JSXElementConstructor<any> = string | JSXElementConstructor<any>> {
+    interface ReactElement<P = any, T extends string | JSXElementConstructor<any> = string | JSXElementConstructor<any>> {
         type: T;
         props: P;
         key: Key | null;
@@ -128,7 +128,7 @@ declare namespace React {
         type: keyof ReactSVG;
     }
 
-    interface ReactPortal extends ReactElement<any> {
+    interface ReactPortal extends ReactElement {
         key: Key | null;
         children: ReactNode;
     }
@@ -172,7 +172,7 @@ declare namespace React {
     // ----------------------------------------------------------------------
 
     type ReactText = string | number;
-    type ReactChild = ReactElement<any> | ReactText;
+    type ReactChild = ReactElement | ReactText;
 
     interface ReactNodeArray extends Array<ReactNode> {}
     type ReactFragment = {} | ReactNodeArray;
@@ -297,7 +297,7 @@ declare namespace React {
         /**
          * **NOTE**: Exotic components are not callable.
          */
-        (props: P): (ReactElement<any>|null);
+        (props: P): (ReactElement|null);
         readonly $$typeof: symbol;
     }
 
@@ -422,7 +422,7 @@ declare namespace React {
         // always pass children as variadic arguments to `createElement`.
         // In the future, if we can define its call signature conditionally
         // on the existence of `children` in `P`, then we should remove this.
-        readonly props: Readonly<{ children?: ReactNode }> & Readonly<P>;
+        readonly props: Readonly<PropsWithChildren<P>>;
         state: Readonly<S>;
         /**
          * @deprecated
@@ -468,7 +468,7 @@ declare namespace React {
     type FC<P = {}> = FunctionComponent<P>;
 
     interface FunctionComponent<P = {}> {
-        (props: P & { children?: ReactNode }, context?: any): ReactElement<any> | null;
+        (props: PropsWithChildren<P>, context?: any): ReactElement | null;
         propTypes?: WeakValidationMap<P>;
         contextTypes?: ValidationMap<any>;
         defaultProps?: Partial<P>;
@@ -476,7 +476,7 @@ declare namespace React {
     }
 
     interface RefForwardingComponent<T, P = {}> {
-        (props: P & { children?: ReactNode }, ref: Ref<T>): ReactElement<any> | null;
+        (props: PropsWithChildren<P>, ref: Ref<T>): ReactElement | null;
         propTypes?: WeakValidationMap<P>;
         contextTypes?: ValidationMap<any>;
         defaultProps?: Partial<P>;
@@ -722,6 +722,8 @@ declare namespace React {
                 : P
             : P;
 
+    type PropsWithChildren<P> = P & { children?: ReactNode };
+
     /**
      * NOTE: prefer ComponentPropsWithRef, if the ref is forwarded,
      * or ComponentPropsWithoutRef when refs are not supported.
@@ -747,7 +749,7 @@ declare namespace React {
 
     function memo<P extends object>(
         Component: SFC<P>,
-        propsAreEqual?: (prevProps: Readonly<P & { children?: ReactNode }>, nextProps: Readonly<P & { children?: ReactNode }>) => boolean
+        propsAreEqual?: (prevProps: Readonly<PropsWithChildren<P>>, nextProps: Readonly<PropsWithChildren<P>>) => boolean
     ): NamedExoticComponent<P>;
     function memo<T extends ComponentType<any>>(
         Component: T,
@@ -775,15 +777,17 @@ declare namespace React {
     type Dispatch<A> = (value: A) => void;
     // Unlike redux, the actions _can_ be anything
     type Reducer<S, A> = (prevState: S, action: A) => S;
+    // types used to try and prevent the compiler from reducing S
+    // to a supertype common with the second argument to useReducer()
+    type ReducerState<R extends Reducer<any, any>> = R extends Reducer<infer S, any> ? S : never;
+    type ReducerAction<R extends Reducer<any, any>> = R extends Reducer<any, infer A> ? A : never;
     // The identity check is done with the SameValue algorithm (Object.is), which is stricter than ===
     // TODO (TypeScript 3.0): ReadonlyArray<unknown>
-    type InputIdentityList = ReadonlyArray<any>;
+    type DependencyList = ReadonlyArray<any>;
 
-    // NOTE: Currently, in alpha.0, the effect callbacks are actually allowed to return anything,
-    // but functions are treated specially. The next version published with hooks will warn if you actually
-    // return anything besides `void` or a callback. Async effects need to call an async function inside
-    // them.
-    type EffectCallback = () => (void | (() => void));
+    // NOTE: callbacks are _only_ allowed to return either void, or a destructor.
+    // The destructor is itself only allowed to return void.
+    type EffectCallback = () => (void | (() => void | undefined));
 
     interface MutableRefObject<T> {
         current: T;
@@ -794,17 +798,25 @@ declare namespace React {
      * Accepts a context object (the value returned from `React.createContext`) and returns the current
      * context value, as given by the nearest context provider for the given context.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#usecontext
      */
     function useContext<T>(context: Context<T>/*, (not public API) observedBits?: number|boolean */): T;
     /**
      * Returns a stateful value, and a function to update it.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#usestate
      */
     function useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+    // convenience overload when first argument is ommitted
+    /**
+     * Returns a stateful value, and a function to update it.
+     *
+     * @version 16.8.0
+     * @see https://reactjs.org/docs/hooks-reference.html#usestate
+     */
+    function useState<S = undefined>(): [S | undefined, Dispatch<SetStateAction<S | undefined>>];
     /**
      * An alternative to `useState`.
      *
@@ -812,10 +824,58 @@ declare namespace React {
      * multiple sub-values. It also lets you optimize performance for components that trigger deep
      * updates because you can pass `dispatch` down instead of callbacks.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#usereducer
      */
-    function useReducer<S, A>(reducer: Reducer<S, A>, initialState: S, initialAction?: A | null): [S, Dispatch<A>];
+    // overload where "I" may be a subset of ReducerState<R>; used to provide autocompletion.
+    // If "I" matches ReducerState<R> exactly then the last overload will allow initializer to be ommitted.
+    // the last overload effectively behaves as if the identity function (x => x) is the initializer.
+    function useReducer<R extends Reducer<any, any>, I>(
+        reducer: R,
+        initializerArg: I & ReducerState<R>,
+        initializer: (arg: I & ReducerState<R>) => ReducerState<R>
+    ): [ReducerState<R>, Dispatch<ReducerAction<R>>];
+    /**
+     * An alternative to `useState`.
+     *
+     * `useReducer` is usually preferable to `useState` when you have complex state logic that involves
+     * multiple sub-values. It also lets you optimize performance for components that trigger deep
+     * updates because you can pass `dispatch` down instead of callbacks.
+     *
+     * @version 16.8.0
+     * @see https://reactjs.org/docs/hooks-reference.html#usereducer
+     */
+    // overload for free "I"; all goes as long as initializer converts it into "ReducerState<R>".
+    function useReducer<R extends Reducer<any, any>, I>(
+        reducer: R,
+        initializerArg: I,
+        initializer: (arg: I) => ReducerState<R>
+    ): [ReducerState<R>, Dispatch<ReducerAction<R>>];
+    /**
+     * An alternative to `useState`.
+     *
+     * `useReducer` is usually preferable to `useState` when you have complex state logic that involves
+     * multiple sub-values. It also lets you optimize performance for components that trigger deep
+     * updates because you can pass `dispatch` down instead of callbacks.
+     *
+     * @version 16.8.0
+     * @see https://reactjs.org/docs/hooks-reference.html#usereducer
+     */
+
+    // I'm not sure if I keep this 2-ary or if I make it (2,3)-ary; it's currently (2,3)-ary.
+    // The Flow types do have an overload for 3-ary invocation with undefined initializer.
+
+    // NOTE: without the ReducerState indirection, TypeScript would reduce S to be the most common
+    // supertype between the reducer's return type and the initialState (or the initializer's return type),
+    // which would prevent autocompletion from ever working.
+
+    // TODO: double-check if this weird overload logic is necessary. It is possible it's either a bug
+    // in older versions, or a regression in newer versions of the typescript completion service.
+    function useReducer<R extends Reducer<any, any>>(
+        reducer: R,
+        initialState: ReducerState<R>,
+        initializer?: undefined
+    ): [ReducerState<R>, Dispatch<ReducerAction<R>>];
     /**
      * `useRef` returns a mutable ref object whose `.current` property is initialized to the passed argument
      * (`initialValue`). The returned object will persist for the full lifetime of the component.
@@ -823,7 +883,7 @@ declare namespace React {
      * Note that `useRef()` is useful for more than the `ref` attribute. It’s handy for keeping any mutable
      * value around similar to how you’d use instance fields in classes.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#useref
      */
     // TODO (TypeScript 3.0): <T extends unknown>
@@ -839,11 +899,25 @@ declare namespace React {
      * Usage note: if you need the result of useRef to be directly mutable, include `| null` in the type
      * of the generic argument.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#useref
      */
     // TODO (TypeScript 3.0): <T extends unknown>
     function useRef<T>(initialValue: T|null): RefObject<T>;
+    // convenience overload for potentially undefined initialValue / call with 0 arguments
+    // has a default to stop it from defaulting to {} instead
+    /**
+     * `useRef` returns a mutable ref object whose `.current` property is initialized to the passed argument
+     * (`initialValue`). The returned object will persist for the full lifetime of the component.
+     *
+     * Note that `useRef()` is useful for more than the `ref` attribute. It’s handy for keeping any mutable
+     * value around similar to how you’d use instance fields in classes.
+     *
+     * @version 16.8.0
+     * @see https://reactjs.org/docs/hooks-reference.html#useref
+     */
+    // TODO (TypeScript 3.0): <T extends unknown>
+    function useRef<T = undefined>(): MutableRefObject<T | undefined>;
     /**
      * The signature is identical to `useEffect`, but it fires synchronously after all DOM mutations.
      * Use this to read layout from the DOM and synchronously re-render. Updates scheduled inside
@@ -854,20 +928,20 @@ declare namespace React {
      * If you’re migrating code from a class component, `useLayoutEffect` fires in the same phase as
      * `componentDidMount` and `componentDidUpdate`.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#uselayouteffect
      */
-    function useLayoutEffect(effect: EffectCallback, inputs?: InputIdentityList): void;
+    function useLayoutEffect(effect: EffectCallback, deps?: DependencyList): void;
     /**
      * Accepts a function that contains imperative, possibly effectful code.
      *
      * @param effect Imperative function that can return a cleanup function
-     * @param inputs If present, effect will only activate if the values in the list change.
+     * @param deps If present, effect will only activate if the values in the list change.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#useeffect
      */
-    function useEffect(effect: EffectCallback, inputs?: InputIdentityList): void;
+    function useEffect(effect: EffectCallback, deps?: DependencyList): void;
     // NOTE: this does not accept strings, but this will have to be fixed by removing strings from type Ref<T>
     /**
      * `useImperativeHandle` customizes the instance value that is exposed to parent components when using
@@ -875,23 +949,23 @@ declare namespace React {
      *
      * `useImperativeHandle` should be used with `React.forwardRef`.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#useimperativehandle
      */
-    function useImperativeHandle<T, R extends T>(ref: Ref<T>|undefined, init: () => R, inputs?: InputIdentityList): void;
+    function useImperativeHandle<T, R extends T>(ref: Ref<T>|undefined, init: () => R, deps?: DependencyList): void;
     // I made 'inputs' required here and in useMemo as there's no point to memoizing without the memoization key
     // useCallback(X) is identical to just using X, useMemo(() => Y) is identical to just using Y.
     /**
      * `useCallback` will return a memoized version of the callback that only changes if one of the `inputs`
      * has changed.
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#usecallback
      */
     // TODO (TypeScript 3.0): <T extends (...args: never[]) => unknown>
-    function useCallback<T extends (...args: any[]) => any>(callback: T, inputs: InputIdentityList): T;
+    function useCallback<T extends (...args: any[]) => any>(callback: T, deps: DependencyList): T;
     /**
-     * `useMemo` will only recompute the memoized value when one of the `inputs` has changed.
+     * `useMemo` will only recompute the memoized value when one of the `deps` has changed.
      *
      * Usage note: if calling `useMemo` with a referentially stable function, also give it as the input in
      * the second argument.
@@ -905,10 +979,23 @@ declare namespace React {
      * }
      * ```
      *
-     * @version experimental
+     * @version 16.8.0
      * @see https://reactjs.org/docs/hooks-reference.html#usememo
      */
-    function useMemo<T>(factory: () => T, inputs: InputIdentityList): T;
+    // allow undefined, but don't make it optional as that is very likely a mistake
+    function useMemo<T>(factory: () => T, deps: DependencyList | undefined): T;
+    /**
+     * `useDebugValue` can be used to display a label for custom hooks in React DevTools.
+     *
+     * NOTE: We don’t recommend adding debug values to every custom hook.
+     * It’s most valuable for custom hooks that are part of shared libraries.
+     *
+     * @version 16.8.0
+     * @see https://reactjs.org/docs/hooks-reference.html#usedebugvalue
+     */
+    // the name of the custom hook is itself derived from the function name at runtime:
+    // it's just the function name without the "use" prefix.
+    function useDebugValue<T>(value: T, format?: (value: T) => any): void;
 
     //
     // Event System

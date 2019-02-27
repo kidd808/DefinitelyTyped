@@ -1,4 +1,4 @@
-// Type definitions for puppeteer 1.11
+// Type definitions for puppeteer 1.12
 // Project: https://github.com/GoogleChrome/puppeteer#readme
 // Definitions by: Marvin Hagemeister <https://github.com/marvinhagemeister>
 //                 Christopher Deutsch <https://github.com/cdeutsch>
@@ -346,10 +346,27 @@ export type ConsoleMessageType = "log"
   | "count"
   | "timeEnd";
 
+export interface ConsoleMessageLocation {
+  /**
+   * URL of the resource if known.
+   */
+  url?: string;
+  /**
+   * Line number in the resource if known
+   */
+  lineNumber?: number;
+  /**
+   * Column number in the resource if known.
+   */
+  columnNumber?: number;
+}
+
 /** ConsoleMessage objects are dispatched by page via the 'console' event. */
 export interface ConsoleMessage {
   /** The message arguments. */
   args(): JSHandle[];
+  /** The location the message originated from */
+  location(): ConsoleMessageLocation;
   /** The message text. */
   text(): string;
   type(): ConsoleMessageType;
@@ -490,6 +507,7 @@ export interface EmulateOptions {
 }
 
 export type EvaluateFn = string | ((...args: any[]) => any);
+export type EvaluateFnReturnType<T extends EvaluateFn> = T extends ((...args: any[]) => infer R) ? R : any;
 
 export type LoadEvent =
   | "load"
@@ -729,10 +747,10 @@ export interface Worker {
    * If the function passed to the `worker.evaluate` returns a non-Serializable value,
    * then `worker.evaluate` resolves to `undefined`.
    */
-  evaluate<T>(
-    pageFunction: (...args: any[]) => T | Promise<T>,
+  evaluate<T extends EvaluateFn>(
+    pageFunction: T,
     ...args: SerializableOrJSHandle[],
-  ): Promise<T>;
+  ): Promise<EvaluateFnReturnType<T>>;
 
   /**
    * The only difference between `worker.evaluate` and `worker.evaluateHandle` is
@@ -841,10 +859,10 @@ export interface ElementHandle<E extends Element = Element> extends JSHandle, Ev
 
 /** The class represents a context for JavaScript execution. */
 export interface ExecutionContext {
-  evaluate(
-    fn: EvaluateFn,
+  evaluate<F extends EvaluateFn>(
+    fn: F,
     ...args: SerializableOrJSHandle[]
-  ): Promise<any>;
+  ): Promise<EvaluateFnReturnType<F>>;
   evaluateHandle(
     fn: EvaluateFn,
     ...args: SerializableOrJSHandle[]
@@ -1087,18 +1105,22 @@ export interface Response {
 }
 
 export interface WaitForSelectorOptions extends Timeoutable {
-    /**
-     * Wait for element to be present in DOM and to be visible,
-     * i.e. to not have display: none or visibility: hidden CSS properties.
-     * @default false
-     */
-    visible?: boolean;
-    /**
-     * Wait for element to not be found in the DOM or to be hidden,
-     * i.e. have display: none or visibility: hidden CSS properties.
-     * @default false
-     */
-    hidden?: boolean;
+  /**
+   * Wait for element to be present in DOM and to be visible,
+   * i.e. to not have display: none or visibility: hidden CSS properties.
+   * @default false
+   */
+  visible?: boolean;
+  /**
+   * Wait for element to not be found in the DOM or to be hidden,
+   * i.e. have display: none or visibility: hidden CSS properties.
+   * @default false
+   */
+  hidden?: boolean;
+}
+
+export interface WaitForSelectorOptionsHidden extends WaitForSelectorOptions {
+  hidden: true;
 }
 
 export interface FrameBase extends Evalable {
@@ -1152,10 +1174,10 @@ export interface FrameBase extends Evalable {
    * @param fn Function to be evaluated in browser context
    * @param args Arguments to pass to `fn`
    */
-  evaluate(
-    fn: EvaluateFn,
+  evaluate<F extends EvaluateFn>(
+    fn: F,
     ...args: SerializableOrJSHandle[]
-  ): Promise<any>;
+  ): Promise<EvaluateFnReturnType<F>>;
 
   /**
    * Evaluates a function in the page context.
@@ -1227,25 +1249,26 @@ export interface FrameBase extends Evalable {
   /**
    * Shortcut for waitForSelector and waitForXPath
    */
+  waitFor(selector: string, options: WaitForSelectorOptionsHidden): Promise<ElementHandle | null>;
   waitFor(selector: string, options?: WaitForSelectorOptions): Promise<ElementHandle>;
 
   /**
    * Shortcut for waitForFunction.
    */
   waitFor(
-    selector: ((...args: any[]) => any) | string,
+    selector: EvaluateFn,
     options?: WaitForSelectorOptions,
     ...args: SerializableOrJSHandle[]
-  ): Promise<any>;
+  ): Promise<JSHandle>;
 
   /**
    * Allows waiting for various conditions.
    */
   waitForFunction(
-    fn: string | ((...args: any[]) => any),
+    fn: EvaluateFn,
     options?: PageFnOptions,
     ...args: SerializableOrJSHandle[]
-  ): Promise<any>;
+  ): Promise<JSHandle>;
 
   /**
    * Wait for the page navigation occur.
@@ -1257,6 +1280,10 @@ export interface FrameBase extends Evalable {
     selector: string,
     options?: WaitForSelectorOptions,
   ): Promise<ElementHandle>;
+  waitForSelector(
+      selector: string,
+      options?: WaitForSelectorOptionsHidden,
+  ): Promise<ElementHandle | null>;
 
   waitForXPath(
     xpath: string,
@@ -1311,6 +1338,8 @@ export interface PageEventObj {
   metrics: { title: string, metrics: Metrics };
   /** Emitted when an uncaught exception happens within the page. */
   pageerror: Error;
+  /** Emitted when the page opens a new tab or window. */
+  popup: Page;
   /**
    * Emitted when a page issues a request. The request object is read-only.
    * In order to intercept and mutate requests, see page.setRequestInterceptionEnabled.
@@ -1523,6 +1552,9 @@ export interface Page extends EventEmitter, FrameBase {
   /** Get the browser the page belongs to. */
   browser(): Browser;
 
+  /** Get the browser context that the page belongs to. */
+  browserContext(): BrowserContext;
+
   /** Closes the current page. */
   close(options?: PageCloseOptions): Promise<void>;
 
@@ -1665,6 +1697,25 @@ export interface Page extends EventEmitter, FrameBase {
    * - `page.waitForNavigation`
    */
   setDefaultNavigationTimeout(timeout: number): void;
+
+  /**
+   * This setting will change the default maximum time for the following methods and related shortcuts:
+   * - `page.goBack`
+   * - `page.goForward`
+   * - `page.goto`
+   * - `page.reload`
+   * - `page.setContent`
+   * - `page.waitFor`
+   * - `page.waitForFunction`
+   * - `page.waitForNavigation`
+   * - `page.waitForRequest`
+   * - `page.waitForResponse`
+   * - `page.waitForSelector`
+   * - `page.waitForXPath`
+   *
+   * NOTE page.setDefaultNavigationTimeout takes priority over page.setDefaultTimeout
+   */
+  setDefaultTimeout(timeout: number): void;
 
   /**
    * The extra HTTP headers will be sent with every request the page initiates.
@@ -2075,8 +2126,15 @@ export interface BrowserOptions {
 }
 
 export interface ConnectOptions extends BrowserOptions {
+  /**
+   * A browser url to connect to, in format `http://${host}:${port}`.
+   * Use interchangeably with browserWSEndpoint to let Puppeteer fetch it from metadata endpoint.
+   */
+  browserURL?: string;
+
   /** A browser websocket endpoint to connect to. */
   browserWSEndpoint?: string;
+
   /**
    * **Experimental** Specify a custom transport object for Puppeteer to use.
    */
